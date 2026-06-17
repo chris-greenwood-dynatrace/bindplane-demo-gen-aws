@@ -1,0 +1,72 @@
+# SINGLE SOURCE OF TRUTH for the healthcare demo.
+# Terraform (locals.tf) and scripts/ read ONLY this file; they never special-case a demo name.
+# See ../../CLAUDE.md for the demo contract + non-negotiable rules.
+
+name: healthcare
+display_name: "Healthcare — Hospital Edge Fleet (Bedside · Infusion · Imaging · Pharmacy · EHR · Facility)"
+description: >
+  BindPlane managing a fleet of OpenTelemetry collectors across a hospital's clinical edge:
+  bedside patient monitors, infusion pumps, imaging modalities (MRI/CT/X-ray), pharmacy
+  automated dispensing cabinets + vaccine cold chain, EHR workstations + clinical kiosks,
+  and facility BMS (OR positive pressure / isolation negative pressure / HVAC / nurse call).
+  Each simulated asset emits ALL THREE signals (metrics + logs + traces) over OTLP with
+  identical resource attributes, so every asset correlates into one Dynatrace entity.
+  Stacks three layers in one demo — biomed (OT) + clinical IT (EHR/PACS) + business
+  (medication administration). Reusable across academic medical centers, community
+  hospitals, integrated delivery networks, ambulatory surgery centers, and long-term care.
+business_variants: [academic_medical_center, community_hospital, idn_multi_hospital, ambulatory_surgery_center, long_term_care]
+
+# ── Collector fleet (agent/gateway pattern). MUST be <= 10 (BindPlane free cap). ──
+# Same labeling scheme as the other demos so config-targeting is consistent across demos:
+#   role=gateway|edge, demo=healthcare, assetgroup=<group>. Labels here MUST equal
+#   demos/healthcare/collectors/<name>.env and the selectors in bindplane/configurations.yaml.
+#
+# Per-asset unified-signals model: each edge collector receives metrics+logs+traces (all OTLP)
+# from the assets it monitors, then forwards to the gateway. No signal-split collectors.
+collectors:
+  total: 7
+  gateway:
+    name: gateway
+    represents: "Regional / HQ gateway — OTLP in from clinical edges + host metrics; OWNS the Dynatrace destination"
+    labels: { role: gateway, demo: healthcare, region: region-east-1 }
+  edges:
+    - name: bedside
+      represents: "Bedside patient monitors (Philips IntelliVue / GE CARESCAPE / Mindray) — vitals + alarms"
+      labels: { role: edge, demo: healthcare, assetgroup: bedside }
+    - name: infusion
+      represents: "Smart infusion pumps (Baxter Spectrum / BD Alaris / ICU Medical Plum) — BCMA + dose libraries"
+      labels: { role: edge, demo: healthcare, assetgroup: infusion }
+    - name: imaging
+      represents: "Imaging modalities (Siemens / GE / Philips) — MRI, CT, X-ray, US; DICOM throughput"
+      labels: { role: edge, demo: healthcare, assetgroup: imaging }
+    - name: pharmacy
+      represents: "Automated dispensing cabinets + vaccine/biologics cold chain (Omnicell / Pyxis / BD Rowa)"
+      labels: { role: edge, demo: healthcare, assetgroup: pharmacy }
+    - name: ehr
+      represents: "EHR workstations + clinical kiosks (Epic / Cerner / Meditech) — chart-open + login + HL7"
+      labels: { role: edge, demo: healthcare, assetgroup: ehr }
+    - name: facility
+      represents: "Facility BMS — OR positive pressure, isolation negative pressure, HVAC, nurse call (Johnson Controls / Siemens)"
+      labels: { role: edge, demo: healthcare, assetgroup: facility }
+
+# ── Three-signal contract: each non-empty, each backed by a simulator service in docker-compose. ──
+# Every device-sim service emits ALL THREE signals, so the same services appear under each key.
+signals:
+  metrics: [device-bedside, device-infusion, device-imaging, device-pharmacy, device-ehr, device-facility]
+  logs:    [device-bedside, device-infusion, device-imaging, device-pharmacy, device-ehr, device-facility]
+  traces:  [device-bedside, device-infusion, device-imaging, device-pharmacy, device-ehr, device-facility]
+
+# ── Volume / cadence guardrails (stay under 10 GB/day free cap). ──
+caps:
+  est_gb_per_day: 5.0
+  scrape_interval_s: 30
+
+# ── BDOT (BindPlane Distro for OpenTelemetry) collector image. PINNED — never :latest. ──
+bdot_image: "ghcr.io/observiq/bindplane-agent:1.101.2"
+
+# ── Optional: recommended VM size override (read by terraform locals as vm_size_hint). ──
+vm_size_hint: "Standard_B2ms"
+
+# ── Wiring hints for scripts / compose (relative to this demo dir). ──
+compose_file: docker-compose.yaml
+bindplane_dir: bindplane

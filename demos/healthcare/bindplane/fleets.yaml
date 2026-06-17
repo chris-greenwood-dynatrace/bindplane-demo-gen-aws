@@ -1,0 +1,29 @@
+---
+# fleets.yaml — apply-ready BindPlane v1 Fleet resources for the healthcare demo.
+# Applied automatically by scripts/up.sh (via bp-apply.sh → bindplane apply).
+#
+# In BindPlane's model a Fleet pairs ONE Configuration with a label selector — the matching
+# agents converge on that pipeline. Because this demo has TWO pipelines (gateway + edge) we
+# define TWO fleets, one per role. Both share demo=healthcare so the UI groups them together
+# under that label filter, but each fleet owns the right pipeline for its agents.
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: healthcare-gateway
+spec:
+  configuration: healthcare-gateway
+  selector:
+    matchLabels:
+      demo: healthcare
+      role: gateway
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: healthcare-edge
+spec:
+  configuration: healthcare-edge
+  selector:
+    matchLabels:
+      demo: healthcare
+      role: edge
