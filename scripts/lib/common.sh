@@ -132,7 +132,7 @@ demo_exists() {
 }
 
 # ── resolve_owner_tag ─────────────────────────────────────────────────────────
-# Produce a stable per-operator identifier for Azure resource naming + tagging.
+# Produce a stable per-operator identifier for AWS resource naming + tagging.
 # Source order:
 #   1. $OWNER_TAG already in env (from .env or shell export)
 #   2. `whoami`, sanitised

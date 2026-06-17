@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/up.sh — spin up a demo on Azure.
+# scripts/up.sh — spin up a demo on AWS.
 # Usage: scripts/up.sh [--demo <name>] [--skip-validate]
 set -euo pipefail
 
@@ -11,7 +11,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Spin up a demo environment on Azure.
+Spin up a demo environment on AWS.
 
 Options:
   --demo <name>      Demo name to deploy (skips interactive picker)
@@ -77,7 +77,7 @@ export TF_VAR_bp_opamp_endpoint="$BP_OPAMP_ENDPOINT"
 export TF_VAR_bp_secret_key="$BP_SECRET_KEY"
 
 # Owner tag — auto-derived from $OWNER_TAG (or `whoami`) so multiple operators do
-# not collide on Azure resource group / VM / VNet names. See terraform/variables.tf.
+# not collide on AWS instance / VPC / security-group names. See terraform/variables.tf.
 OWNER="$(resolve_owner_tag)"
 export TF_VAR_owner="$OWNER"
 info "Using owner tag: $OWNER (override with OWNER_TAG in .env)"
@@ -98,8 +98,8 @@ else
   export TF_VAR_admin_source_cidr="$ADMIN_SOURCE_CIDR"
 fi
 
-export TF_VAR_location="${AZURE_LOCATION:-eastus}"
-export TF_VAR_vm_size="${VM_SIZE:-Standard_B2s}"
+export TF_VAR_region="${AWS_REGION:-us-east-1}"
+export TF_VAR_instance_type="${INSTANCE_TYPE:-t3.medium}"
 
 # ── terraform init + apply ────────────────────────────────────────────────────
 info "Initializing Terraform..."

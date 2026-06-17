@@ -1,6 +1,6 @@
 ---
 name: bindplane-validate
-description: Static guardrail that validates a bindplane-demo demo before any Azure spend — checks collector cap (≤10), three-signal completeness, Dynatrace OTLP http/protobuf + cumulativetodelta, daily volume cap, label↔selector agreement, and pinned BDOT image. Use before spinning up infra, after scaffolding or editing a demo, or when the user asks to "validate the demo" / "check before deploy".
+description: Static guardrail that validates a bindplane-demo demo before any AWS spend — checks collector cap (≤10), three-signal completeness, Dynatrace OTLP http/protobuf + cumulativetodelta, daily volume cap, label↔selector agreement, and pinned BDOT image. Use before spinning up infra, after scaffolding or editing a demo, or when the user asks to "validate the demo" / "check before deploy".
 ---
 
 # bindplane-validate

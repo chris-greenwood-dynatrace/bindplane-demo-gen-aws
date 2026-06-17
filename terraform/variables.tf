@@ -8,33 +8,33 @@ variable "demo" {
   }
 }
 
-variable "location" {
+variable "region" {
   type        = string
-  description = "Azure region for all resources."
-  default     = "eastus"
+  description = "AWS region for all resources."
+  default     = "us-east-1"
 }
 
-variable "vm_size" {
+variable "instance_type" {
   type        = string
-  description = "Azure VM SKU. Overridden by manifest vm_size_hint if present. Default is cost-optimised for demos."
-  default     = "Standard_B2s"
+  description = "EC2 instance type. Overridden by manifest instance_type_hint if present. Default is cost-optimised for demos."
+  default     = "t3.medium"
 }
 
 variable "admin_username" {
   type        = string
-  description = "Linux admin username on the VM."
-  default     = "azureuser"
+  description = "Linux admin username on the instance. Should match the AMI's default cloud-init user (Ubuntu = ubuntu)."
+  default     = "ubuntu"
 }
 
 variable "ssh_public_key" {
   type        = string
-  description = "SSH public key (full openssh-format string) for VM admin access. Key-auth only — password auth is disabled."
+  description = "SSH public key (full openssh-format string) for instance admin access. Key-auth only — password auth is disabled on Ubuntu AMIs by default."
 }
 
 variable "admin_source_cidr" {
   type        = string
   description = <<-EOT
-    CIDR allowed to reach TCP/22 on the VM. Defaults to 0.0.0.0/0 (any) which is convenient for
+    CIDR allowed to reach TCP/22 on the instance. Defaults to 0.0.0.0/0 (any) which is convenient for
     ephemeral demo environments. For production or shared environments narrow this to your IP:
     e.g. "203.0.113.10/32". scripts/up.sh will auto-detect and set this to your current public IP
     if ADMIN_SOURCE_CIDR is left blank in .env.
@@ -63,9 +63,9 @@ variable "resource_prefix" {
 variable "owner" {
   type        = string
   description = <<-EOT
-    Per-operator identifier woven into every Azure resource name and tagged on every
-    resource. Lets multiple operators run demos in the same subscription without
-    colliding on resource group / VM / VNet names. Must be 1-12 lowercase alphanumeric
+    Per-operator identifier woven into every AWS resource name and tagged on every
+    resource. Lets multiple operators run demos in the same AWS account without
+    colliding on VPC / instance / security-group names. Must be 1-12 lowercase alphanumeric
     characters. scripts/up.sh derives this automatically from $OWNER_TAG (or `whoami`
     if unset); override by setting OWNER_TAG in .env.
   EOT

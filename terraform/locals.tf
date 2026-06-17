@@ -8,18 +8,16 @@ locals {
   # Total collector count; used in tags for visibility.
   collector_total = local.manifest.collectors.total
 
-  # Allow the manifest to carry an optional vm_size_hint; fall back to the Terraform variable.
-  effective_vm_size = try(local.manifest.vm_size_hint, var.vm_size)
+  # Allow the manifest to carry an optional instance_type_hint; fall back to the Terraform variable.
+  effective_instance_type = try(local.manifest.instance_type_hint, var.instance_type)
 
   # Stable name suffix derived from the demo slug + per-operator owner tag, so multiple
-  # operators can deploy demos side-by-side in the same Azure subscription without
-  # colliding on resource group / VM / VNet names. Example: bpdemo-clintons-energy.
+  # operators can deploy demos side-by-side in the same AWS account without
+  # colliding on VPC / instance / security-group names. Example: bpdemo-clintons-energy.
   name_suffix = "${var.resource_prefix}-${var.owner}-${var.demo}"
 
-  # Resource group name — everything lives here so `terraform destroy` is atomic.
-  resource_group_name = "rg-${local.name_suffix}"
-
-  # Common tags applied to every resource.
+  # Common tags applied to every resource. Tagging (not a resource group) is how all
+  # of a run's resources are grouped in AWS; `terraform destroy` tears them down atomically.
   common_tags = {
     demo            = var.demo
     display_name    = local.display_name

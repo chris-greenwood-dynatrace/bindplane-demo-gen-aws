@@ -7,9 +7,9 @@
 
 ## What up.sh does automatically
 
-1. Terraform provisions the Azure VM and writes `/opt/demo/.env` (contains `DT_ENV_ID`,
+1. Terraform provisions the AWS EC2 instance and writes `/opt/demo/.env` (contains `DT_ENV_ID`,
    `DT_API_TOKEN`, `BP_OPAMP_ENDPOINT`, `BP_SECRET_KEY`).
-2. Docker Compose starts all collectors + simulators on the VM. Collectors enroll to
+2. Docker Compose starts all collectors + simulators on the instance. Collectors enroll to
    BindPlane Cloud over OpAMP immediately.
 3. `bindplane apply -f bindplane/destinations.yaml` creates (or updates) the two Destination
    resources: `dynatrace-<DEMO_NAME>` and `gateway-otlp-<DEMO_NAME>`.
@@ -21,9 +21,9 @@
 ## Prerequisites (before running up.sh)
 
 - [ ] `.env` in repo root contains: `BP_OPAMP_ENDPOINT`, `BP_SECRET_KEY`, `BP_API_KEY`,
-      `BP_ORG_ID`, `DT_ENV_ID`, `DT_API_TOKEN`, `SSH_PUBLIC_KEY_PATH`, `AZURE_LOCATION`
+      `BP_ORG_ID`, `DT_ENV_ID`, `DT_API_TOKEN`, `SSH_PUBLIC_KEY_PATH`, `AWS_REGION`
 - [ ] Dynatrace API token scopes: `metrics.ingest`, `logs.ingest`, `openTelemetry.ingest`
-- [ ] Azure credentials active (`az login` or ARM env vars set)
+- [ ] AWS credentials active (`aws configure`, `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` set)
 
 ## Verify after up.sh completes
 

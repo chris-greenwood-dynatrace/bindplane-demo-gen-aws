@@ -1,21 +1,21 @@
 output "public_ip" {
-  description = "Public IPv4 address of the demo VM."
-  value       = module.network.public_ip_address
+  description = "Public IPv4 address (Elastic IP) of the demo instance."
+  value       = module.vm.public_ip
 }
 
 output "ssh_command" {
-  description = "Ready-to-paste SSH command to reach the VM."
-  value       = "ssh ${var.admin_username}@${module.network.public_ip_address}"
+  description = "Ready-to-paste SSH command to reach the instance."
+  value       = "ssh ${var.admin_username}@${module.vm.public_ip}"
 }
 
 output "vm_name" {
-  description = "Name of the Azure Linux VM resource."
+  description = "Name tag of the EC2 instance."
   value       = module.vm.vm_name
 }
 
-output "resource_group_name" {
-  description = "Resource group containing all demo resources. Run `terraform destroy` to tear everything down atomically."
-  value       = azurerm_resource_group.this.name
+output "instance_id" {
+  description = "ID of the EC2 instance. All run resources share the owner/demo tags; `terraform destroy` tears them down atomically."
+  value       = module.vm.instance_id
 }
 
 output "demo" {
@@ -24,6 +24,6 @@ output "demo" {
 }
 
 output "admin_username" {
-  description = "Admin username on the demo VM (used by SSH)."
+  description = "Admin username on the demo instance (used by SSH)."
   value       = var.admin_username
 }

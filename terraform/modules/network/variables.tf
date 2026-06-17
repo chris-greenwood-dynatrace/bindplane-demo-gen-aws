@@ -1,13 +1,3 @@
-variable "resource_group_name" {
-  type        = string
-  description = "Name of the resource group in which to create network resources."
-}
-
-variable "location" {
-  type        = string
-  description = "Azure region."
-}
-
 variable "name_suffix" {
   type        = string
   description = "Suffix appended to all network resource names (e.g. bpdemo-manufacturing)."

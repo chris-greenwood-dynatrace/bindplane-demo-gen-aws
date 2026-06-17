@@ -12,7 +12,7 @@ PUBLIC_IP="$(tf output -raw public_ip 2>/dev/null || true)"
 ADMIN_USER="$(tf output -raw admin_username 2>/dev/null || true)"
 
 # Default admin username if terraform has not yet set it
-ADMIN_USER="${ADMIN_USER:-azureuser}"
+ADMIN_USER="${ADMIN_USER:-ubuntu}"
 
 if [[ -z "$PUBLIC_IP" ]]; then
   err "No running VM found. Run scripts/up.sh first."

@@ -1,26 +1,16 @@
-variable "resource_group_name" {
-  type        = string
-  description = "Resource group in which to create the VM."
-}
-
-variable "location" {
-  type        = string
-  description = "Azure region."
-}
-
 variable "name_suffix" {
   type        = string
-  description = "Suffix appended to the VM name (e.g. bpdemo-manufacturing)."
+  description = "Suffix appended to the instance name (e.g. bpdemo-manufacturing)."
 }
 
-variable "vm_size" {
+variable "instance_type" {
   type        = string
-  description = "Azure VM SKU."
+  description = "EC2 instance type."
 }
 
 variable "admin_username" {
   type        = string
-  description = "Linux admin username."
+  description = "Linux admin username (the AMI's default cloud-init user)."
 }
 
 variable "ssh_public_key" {
@@ -28,18 +18,23 @@ variable "ssh_public_key" {
   description = "Full openssh-format public key string for admin SSH access."
 }
 
-variable "nic_id" {
+variable "subnet_id" {
   type        = string
-  description = "Resource ID of the network interface to attach."
+  description = "ID of the subnet to launch the instance in."
 }
 
-variable "custom_data" {
+variable "security_group_id" {
   type        = string
-  description = "Base64-encoded cloud-init payload."
+  description = "ID of the security group to attach to the instance."
+}
+
+variable "user_data" {
+  type        = string
+  description = "Cloud-init payload (plain text; AWS base64-encodes it)."
 }
 
 variable "tags" {
   type        = map(string)
-  description = "Tags applied to the VM and its OS disk."
+  description = "Tags applied to the instance and its root volume."
   default     = {}
 }

@@ -1,9 +1,14 @@
-output "nic_id" {
-  description = "Resource ID of the network interface to attach to the VM."
-  value       = azurerm_network_interface.this.id
+output "subnet_id" {
+  description = "ID of the public subnet to launch the instance in."
+  value       = aws_subnet.this.id
 }
 
-output "public_ip_address" {
-  description = "Public IPv4 address of the VM (static, Standard SKU)."
-  value       = azurerm_public_ip.this.ip_address
+output "security_group_id" {
+  description = "ID of the security group to attach to the instance."
+  value       = aws_security_group.this.id
+}
+
+output "vpc_id" {
+  description = "ID of the VPC."
+  value       = aws_vpc.this.id
 }

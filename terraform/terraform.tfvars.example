@@ -2,11 +2,11 @@
 # Secrets live in secrets.auto.tfvars (also gitignored) — do NOT put them here.
 # scripts/up.sh generates both files from .env automatically.
 
-demo              = "manufacturing"
-location          = "eastus"
-vm_size           = "Standard_B2s"
-admin_username    = "azureuser"
-resource_prefix   = "bpdemo"
+demo            = "manufacturing"
+region          = "us-east-1"
+instance_type   = "t3.medium"
+admin_username  = "ubuntu"
+resource_prefix = "bpdemo"
 
 # Narrow to your workstation IP to avoid exposing SSH publicly:
 # admin_source_cidr = "203.0.113.10/32"

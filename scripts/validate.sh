@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/validate.sh — static validation of a demo before Azure spend.
+# scripts/validate.sh — static validation of a demo before AWS spend.
 # Usage: scripts/validate.sh <demo-name>
 # Exits 0 if all checks PASS (WARNs ok), 1 if any FAIL.
 set -euo pipefail

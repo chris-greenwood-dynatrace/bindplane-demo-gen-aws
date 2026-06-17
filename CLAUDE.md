@@ -47,7 +47,7 @@ edit. `scripts/demos.sh list` auto-discovers it via `demos/*/manifest.yaml`.
    `OPAMP_LABELS`. BindPlane uses subset matching (extra labels on the collector are fine).
 7. **No secrets committed.** Tokens come from `.env` / `secrets.auto.tfvars` (gitignored) only.
 
-Run the **`bindplane-validate`** skill before any Azure spend — it checks 1–7 statically.
+Run the **`bindplane-validate`** skill before any AWS spend — it checks 1–7 statically.
 
 ## BindPlane on the free plan (IMPORTANT)
 
@@ -100,7 +100,7 @@ Without `BP_API_KEY`, `up.sh` warns and skips apply; collectors enroll but recei
 ```
 scripts/up.sh --demo <name>
   → terraform apply -var demo=<name>   (reads demos/<name>/manifest.yaml via locals.tf)
-  → 1 Azure Linux VM, single resource group, cloud-init installs docker + runs the demo's compose
+  → 1 AWS EC2 instance in a VPC, cloud-init installs docker + runs the demo's compose
   → BDOT collectors enroll to BindPlane Cloud over OpAMP (endpoint+secret+labels)
   → simulators feed collectors; instrumented FastAPI app emits traces to the gateway collector
   → scripts/bp-apply.sh:
@@ -119,7 +119,7 @@ managed in BindPlane); edge collectors forward OTLP to the gateway via `otlp_grp
 
 ## Project agents & skills (`.claude/`)
 
-- **agents/terraform-azure** — the Azure root + modules + cloud-init. Keep it demo-agnostic.
+- **agents/terraform-aws** — the AWS root + modules + cloud-init. Keep it demo-agnostic.
 - **agents/bindplane-pipeline** — `demos/*/bindplane/*.yaml` blueprints + rollout runbooks.
 - **agents/otel-simulator** — Compose simulators + instrumented trace apps (3-signal contract).
 - **skills/demo-scaffold** — generate a new `demos/<name>/` from `demos/_template/`.

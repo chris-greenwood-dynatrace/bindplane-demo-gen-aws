@@ -53,8 +53,8 @@ caps:
 # ── BDOT (BindPlane Distro for OpenTelemetry) collector image. PINNED — never :latest. ──
 bdot_image: "ghcr.io/observiq/bindplane-agent:1.101.2"
 
-# ── Optional: recommended VM size override (read by terraform locals as vm_size_hint). ──
-vm_size_hint: "Standard_B2ms"
+# ── Optional: recommended instance type override (read by terraform locals as instance_type_hint). ──
+instance_type_hint: "t3.large"
 
 # ── Wiring hints for scripts / compose (relative to this demo dir). ──
 compose_file: docker-compose.yaml

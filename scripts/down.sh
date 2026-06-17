@@ -11,7 +11,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Tear down the running demo environment on Azure.
+Tear down the running demo environment on AWS.
 
 Options:
   --demo <name>        Demo name to destroy (inferred from Terraform state if omitted)
@@ -85,11 +85,11 @@ info "Tearing down demo: $DEMO"
 export TF_VAR_demo="${DEMO}"
 export TF_VAR_bp_opamp_endpoint="$BP_OPAMP_ENDPOINT"
 export TF_VAR_bp_secret_key="$BP_SECRET_KEY"
-export TF_VAR_location="${AZURE_LOCATION:-eastus}"
-export TF_VAR_vm_size="${VM_SIZE:-Standard_B2s}"
+export TF_VAR_region="${AWS_REGION:-us-east-1}"
+export TF_VAR_instance_type="${INSTANCE_TYPE:-t3.medium}"
 
 # Owner tag — MUST match the value used at up.sh time or terraform will plan a
-# replacement of a different (non-existent) resource group. resolve_owner_tag
+# replacement of different (non-existent) resources. resolve_owner_tag
 # uses the same source order as up.sh ($OWNER_TAG → whoami).
 export TF_VAR_owner="$(resolve_owner_tag)"
 
@@ -107,7 +107,7 @@ export TF_VAR_admin_source_cidr="${ADMIN_SOURCE_CIDR:-0.0.0.0/0}"
 # ── best-effort collector drain ───────────────────────────────────────────────
 info "Draining collectors (best-effort, freeing BindPlane cap)..."
 PUBLIC_IP="$(tf output -raw public_ip 2>/dev/null || true)"
-ADMIN_USER="$(tf output -raw admin_username 2>/dev/null || echo "azureuser")"
+ADMIN_USER="$(tf output -raw admin_username 2>/dev/null || echo "ubuntu")"
 
 if [[ -n "$PUBLIC_IP" ]]; then
   SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes"
@@ -139,7 +139,7 @@ info "Destroying infrastructure for demo '$DEMO'..."
 tf destroy -auto-approve -var "demo=$DEMO"
 
 # ── confirm and remind ────────────────────────────────────────────────────────
-info "Resource group destroyed. Azure resources are gone."
+info "Infrastructure destroyed. AWS resources are gone."
 info ""
 if [[ "$PURGE_BINDPLANE" == "true" ]]; then
   info "BindPlane Agents, Fleets, Configurations, and Destinations for demo '$DEMO' were also deleted."

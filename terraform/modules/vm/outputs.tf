@@ -1,9 +1,14 @@
 output "vm_name" {
-  description = "Name of the Linux VM resource."
-  value       = azurerm_linux_virtual_machine.this.name
+  description = "Name tag of the EC2 instance."
+  value       = aws_instance.this.tags["Name"]
 }
 
-output "admin_username" {
-  description = "Admin username configured on the VM."
-  value       = azurerm_linux_virtual_machine.this.admin_username
+output "instance_id" {
+  description = "ID of the EC2 instance."
+  value       = aws_instance.this.id
+}
+
+output "public_ip" {
+  description = "Elastic IP address attached to the instance."
+  value       = aws_eip.this.public_ip
 }
