@@ -1,0 +1,204 @@
+# docker-compose.yaml — Networking demo: NOC fleet of BDOT collectors + unified device simulators.
+# Run with: sudo docker compose --env-file /opt/demo/.env --env-file .env.demo up -d
+#
+# Env var sources:
+#   /opt/demo/.env   — secrets: BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_ENV_ID, DT_API_TOKEN
+#   .env.demo        — non-secret knobs: SCRAPE_INTERVAL_S, DEVICE_COUNT, FAILURE_RATE, etc.
+#   collectors/*.env — per-collector OPAMP_LABELS only
+
+# Pinned BDOT image — must match manifest.yaml bdot_image.
+x-bdot-defaults: &bdot-base
+  image: ${BDOT_IMAGE:-ghcr.io/observiq/bindplane-agent:1.101.2}
+  restart: unless-stopped
+  environment:
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  networks:
+    - noc
+
+# Shared device-sim build context (one image, four service instances).
+x-device-sim: &device-sim-base
+  build:
+    context: ./simulators/device-sim
+    dockerfile: Dockerfile
+  image: net-device-sim:local
+  restart: unless-stopped
+  networks:
+    - noc
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BDOT COLLECTORS — enroll to BindPlane Cloud over OpAMP.
+  # Pipelines are PUSHED by BindPlane (see bindplane/). Compose only enrolls agents.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Gateway collector ──────────────────────────────────────────────────────
+  # Receives OTLP from all edge collectors. Owns the Dynatrace destination.
+  # OTLP gRPC :4317 (internal) + HTTP :4318 (published to host for debugging).
+  gateway:
+    <<: *bdot-base
+    container_name: net-gateway
+    env_file:
+      - collectors/gateway.env        # OPAMP_LABELS=role=gateway,demo=networking,noc=primary
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: gateway
+      DT_ENV_ID: ${DT_ENV_ID}         # Dynatrace env — used by BindPlane destination config
+      DT_API_TOKEN: ${DT_API_TOKEN}   # Only the gateway holds the DT token
+    ports:
+      - "4318:4318"                   # OTLP HTTP — exposed to host for debugging
+
+  # ── site-core edge collector — core routers + distribution switches ────────
+  # Receives metrics + logs + traces from device-core over OTLP gRPC :4317.
+  site-core:
+    <<: *bdot-base
+    container_name: net-site-core
+    env_file:
+      - collectors/site-core.env      # OPAMP_LABELS=role=edge,demo=networking,devgroup=core
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: site-core
+    depends_on:
+      - gateway
+
+  # ── site-edge edge collector — WAN / edge routers ─────────────────────────
+  # Receives metrics + logs + traces from device-edge over OTLP gRPC :4317.
+  site-edge:
+    <<: *bdot-base
+    container_name: net-site-edge
+    env_file:
+      - collectors/site-edge.env      # OPAMP_LABELS=role=edge,demo=networking,devgroup=edge
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: site-edge
+    depends_on:
+      - gateway
+
+  # ── firewalls edge collector — firewall fleet ─────────────────────────────
+  # Receives metrics + logs + traces from device-fw over OTLP gRPC :4317.
+  firewalls:
+    <<: *bdot-base
+    container_name: net-firewalls
+    env_file:
+      - collectors/firewalls.env      # OPAMP_LABELS=role=edge,demo=networking,devgroup=fw
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: firewalls
+    depends_on:
+      - gateway
+
+  # ── loadbalancers edge collector — load balancer fleet ────────────────────
+  # Receives metrics + logs + traces from device-lb over OTLP gRPC :4317.
+  loadbalancers:
+    <<: *bdot-base
+    container_name: net-loadbalancers
+    env_file:
+      - collectors/loadbalancers.env  # OPAMP_LABELS=role=edge,demo=networking,devgroup=lb
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: loadbalancers
+    depends_on:
+      - gateway
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # DEVICE SIMULATORS — one per group.
+  # Logs + metrics + traces: OTLP gRPC to the edge collector.
+  # Identical identity attributes on all 3 signals → one DT entity per device.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── device-core — core routers → site-core:4317 ──────────────────────────
+  # GROUP=core, DEVICE_TYPE="core router", VENDOR="Cisco"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-core:
+    <<: *device-sim-base
+    container_name: net-device-core
+    environment:
+      GROUP: core
+      GROUP_NAME: "Core Routers"
+      DEVICE_TYPE: "core router"
+      DEVICE_VENDOR: "Cisco"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      INTERFACES_PER_DEVICE: ${INTERFACES_PER_DEVICE:-4}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "site-core:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - site-core
+
+  # ── device-edge — WAN routers → site-edge:4317 ───────────────────────────
+  # GROUP=edge, DEVICE_TYPE="WAN router", VENDOR="Juniper"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # (includes net.latency.rtt + net.packet.loss)
+  device-edge:
+    <<: *device-sim-base
+    container_name: net-device-edge
+    environment:
+      GROUP: edge
+      GROUP_NAME: "WAN Routers"
+      DEVICE_TYPE: "WAN router"
+      DEVICE_VENDOR: "Juniper"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      INTERFACES_PER_DEVICE: ${INTERFACES_PER_DEVICE:-4}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "site-edge:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - site-edge
+
+  # ── device-fw — firewalls → firewalls:4317 ───────────────────────────────
+  # GROUP=fw, DEVICE_TYPE="firewall", VENDOR="Palo Alto"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # (includes firewall.sessions.active + throughput)
+  device-fw:
+    <<: *device-sim-base
+    container_name: net-device-fw
+    environment:
+      GROUP: fw
+      GROUP_NAME: "Firewalls"
+      DEVICE_TYPE: "firewall"
+      DEVICE_VENDOR: "Palo Alto"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      INTERFACES_PER_DEVICE: ${INTERFACES_PER_DEVICE:-4}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "firewalls:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - firewalls
+
+  # ── device-lb — load balancers → loadbalancers:4317 ──────────────────────
+  # GROUP=lb, DEVICE_TYPE="load balancer", VENDOR="F5"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # (includes lb.connections.active + pool.members.up)
+  device-lb:
+    <<: *device-sim-base
+    container_name: net-device-lb
+    environment:
+      GROUP: lb
+      GROUP_NAME: "Load Balancers"
+      DEVICE_TYPE: "load balancer"
+      DEVICE_VENDOR: "F5"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      INTERFACES_PER_DEVICE: ${INTERFACES_PER_DEVICE:-4}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "loadbalancers:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - loadbalancers
+
+# ════════════════════════════════════════════════════════════════════════════
+# NETWORK
+# ════════════════════════════════════════════════════════════════════════════
+
+networks:
+  noc:
+    driver: bridge

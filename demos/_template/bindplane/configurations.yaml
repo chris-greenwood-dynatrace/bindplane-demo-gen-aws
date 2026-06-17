@@ -1,0 +1,104 @@
+---
+# configurations.yaml — apply-ready BindPlane v1 Configuration resources for <DEMO_NAME>.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/configurations.yaml
+#
+# TWO Configurations cover all collectors (collapsed 2-config model).
+# matchLabels use subset matching — collectors with EXTRA labels beyond the selector still match.
+#
+# Selector ↔ collector label verification:
+#   <DEMO_NAME>-gateway: {role: gateway, demo: <DEMO_NAME>}
+#     gateway.env  OPAMP_LABELS=role=gateway,demo=<DEMO_NAME>,...   MATCH (extra labels fine)
+#
+#   <DEMO_NAME>-edge: {role: edge, demo: <DEMO_NAME>}
+#     <edge>.env   OPAMP_LABELS=role=edge,demo=<DEMO_NAME>,...      MATCH (extra labels fine)
+#
+# NOTE: dynatrace_otlp destination handles delta temporality conversion internally —
+# no cumulativetodelta processor is required or available in the catalog.
+# NOTE: detectors=[system] only — docker is not a valid detector value in the catalog.
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: <DEMO_NAME>-gateway
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: gateway
+      demo: <DEMO_NAME>
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+        - name: http_port
+          value: 4318
+      processors:
+        - type: resource_detection_v2
+          parameters:
+            - name: detectors
+              value:
+                - system
+            - name: override
+              value: false
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+    - type: host
+      parameters:
+        - name: collection_interval
+          value: 60
+        - name: enable_process
+          value: false
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+  destinations:
+    - name: dynatrace-<DEMO_NAME>
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: <DEMO_NAME>-edge
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: edge
+      demo: <DEMO_NAME>
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 500
+            - name: timeout
+              value: 5s
+  destinations:
+    - name: gateway-otlp-<DEMO_NAME>

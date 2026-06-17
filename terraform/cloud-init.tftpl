@@ -1,0 +1,54 @@
+#cloud-config
+# Rendered by Terraform for demo: ${demo}
+# Prepares the host: installs Docker, writes secrets. scripts/up.sh transfers
+# the demo directory and runs docker compose — cloud-init does NOT start compose.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+
+runcmd:
+  # ── Install Docker Engine (official apt repository) ────────────────────────
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+    https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list
+  - apt-get update -qq
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # ── Verify Docker is running ───────────────────────────────────────────────
+  - systemctl enable --now docker
+
+  # ── Create demo working directory ─────────────────────────────────────────
+  # Owned by the admin user so scripts/up.sh can rsync demo files in without sudo.
+  - mkdir -p /opt/demo
+  - chown ${admin_username}:${admin_username} /opt/demo
+  - chmod 755 /opt/demo
+
+  # ── Write secrets to /opt/demo/.env (root-only, 600) ──────────────────────
+  # NOTE: Dynatrace credentials are NOT stored here. The Dynatrace destination
+  # is configured entirely in the BindPlane Cloud UI. Only OpAMP enrollment
+  # credentials are needed on the VM so collectors can enroll over OpAMP wss.
+  - |
+    cat > /opt/demo/.env <<'ENVEOF'
+    BP_OPAMP_ENDPOINT=${bp_opamp_endpoint}
+    BP_SECRET_KEY=${bp_secret_key}
+    ENVEOF
+  - chmod 600 /opt/demo/.env
+  - chown root:root /opt/demo/.env
+
+  # ── Readiness marker (scripts/up.sh polls for this file via SSH) ──────────
+  - touch /opt/demo/CLOUD_INIT_DONE
+  - chmod 644 /opt/demo/CLOUD_INIT_DONE
+
+final_message: |
+  cloud-init complete for demo '${demo}'.
+  Docker installed. /opt/demo/.env written (600). Waiting for scripts/up.sh to transfer compose stack.

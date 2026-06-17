@@ -1,0 +1,29 @@
+---
+# fleets.yaml — apply-ready BindPlane v1 Fleet resources for <DEMO_NAME>.
+# Applied automatically by scripts/up.sh (via bp-apply.sh → bindplane apply).
+#
+# In BindPlane's model a Fleet pairs ONE Configuration with a label selector — the matching
+# agents converge on that pipeline. Because each demo has TWO pipelines (gateway + edge) we
+# define TWO fleets, one per role. Both share demo=<DEMO_NAME> so the UI groups them together
+# under that label filter, but each fleet owns the right pipeline for its agents.
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: <DEMO_NAME>-gateway
+spec:
+  configuration: <DEMO_NAME>-gateway
+  selector:
+    matchLabels:
+      demo: <DEMO_NAME>
+      role: gateway
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: <DEMO_NAME>-edge
+spec:
+  configuration: <DEMO_NAME>-edge
+  selector:
+    matchLabels:
+      demo: <DEMO_NAME>
+      role: edge

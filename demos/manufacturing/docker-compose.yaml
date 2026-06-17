@@ -1,0 +1,209 @@
+# docker-compose.yaml — Manufacturing demo: factory fleet of BDOT collectors + device-sim.
+# Run with: sudo docker compose --env-file /opt/demo/.env --env-file .env.demo up -d
+#
+# Env var sources:
+#   /opt/demo/.env   — secrets: BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_ENV_ID, DT_API_TOKEN
+#   .env.demo        — non-secret knobs: SCRAPE_INTERVAL_S, DEVICE_COUNT, FAULT_RATE, INTENSITY
+#   collectors/*.env — per-collector OPAMP_LABELS only (no signal= label in new model)
+#
+# Signal model: each device-sim container emits logs + metrics + traces over OTLP gRPC
+# to its edge collector.
+# Identical identity attributes on all 3 signals → one Dynatrace entity per machine.
+# Edge collectors forward all 3 signals to the gateway via OTLP. Gateway holds DT token.
+
+x-bdot-defaults: &bdot-base
+  image: ${BDOT_IMAGE:-ghcr.io/observiq/bindplane-agent:1.101.2}
+  restart: unless-stopped
+  environment:
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  networks:
+    - factory
+
+x-device-sim-defaults: &device-sim-base
+  build:
+    context: ./simulators/device-sim
+    dockerfile: Dockerfile
+  image: mfg-device-sim:local
+  restart: unless-stopped
+  networks:
+    - factory
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BDOT COLLECTORS — enroll to BindPlane Cloud over OpAMP.
+  # Pipelines are PUSHED by BindPlane (see bindplane/). Compose only enrolls agents.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Gateway collector ────────────────────────────────────────────────────
+  # Receives OTLP from all edge collectors. Owns the Dynatrace destination.
+  # BindPlane pushes: OTLP grpc receiver on :4317, OTLP http receiver on :4318, hostmetrics.
+  gateway:
+    <<: *bdot-base
+    container_name: mfg-gateway
+    env_file:
+      - collectors/gateway.env    # OPAMP_LABELS=role=gateway,demo=manufacturing,site=plant-1
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: gateway
+      DT_ENV_ID: ${DT_ENV_ID}
+      DT_API_TOKEN: ${DT_API_TOKEN}
+    ports:
+      - "4318:4318"               # OTLP HTTP exposed to host for debugging
+
+  # ── Line A edge collector ─────────────────────────────────────────────────
+  # Receives metrics + logs + traces from device-line-a via OTLP gRPC :4317 (internal).
+  line-a:
+    <<: *bdot-base
+    container_name: mfg-line-a
+    env_file:
+      - collectors/line-a.env     # OPAMP_LABELS=role=edge,demo=manufacturing,line=A
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: line-a
+    depends_on:
+      - device-line-a
+
+  # ── Line B edge collector ─────────────────────────────────────────────────
+  line-b:
+    <<: *bdot-base
+    container_name: mfg-line-b
+    env_file:
+      - collectors/line-b.env     # OPAMP_LABELS=role=edge,demo=manufacturing,line=B
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: line-b
+    depends_on:
+      - device-line-b
+
+  # ── Line C edge collector ─────────────────────────────────────────────────
+  line-c:
+    <<: *bdot-base
+    container_name: mfg-line-c
+    env_file:
+      - collectors/line-c.env     # OPAMP_LABELS=role=edge,demo=manufacturing,line=C
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: line-c
+    depends_on:
+      - device-line-c
+
+  # ── Packaging edge collector ──────────────────────────────────────────────
+  packaging:
+    <<: *bdot-base
+    container_name: mfg-packaging
+    env_file:
+      - collectors/packaging.env  # OPAMP_LABELS=role=edge,demo=manufacturing,line=pkg
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: packaging
+    depends_on:
+      - device-packaging
+
+  # ── Utilities edge collector ──────────────────────────────────────────────
+  utilities:
+    <<: *bdot-base
+    container_name: mfg-utilities
+    env_file:
+      - collectors/utilities.env  # OPAMP_LABELS=role=edge,demo=manufacturing,line=util
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: utilities
+    depends_on:
+      - device-utilities
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # DEVICE-SIM SERVICES — one container per line, each emits metrics + logs + traces.
+  # Service names match manifest.signals (device-line-a, device-line-b, etc.).
+  # Each machine builds its own OTel Resource so all 3 signals carry identical attributes.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Line A — CNC mills ───────────────────────────────────────────────────
+  # Signals: logs + metrics + traces → line-a:4317 (OTLP gRPC)
+  device-line-a:
+    <<: *device-sim-base
+    container_name: mfg-device-line-a
+    environment:
+      LINE: "A"
+      LINE_NAME: "Line A"
+      MACHINE_TYPE: "CNC mill"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "line-a:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAULT_RATE: ${FAULT_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+
+  # ── Line B — CNC lathes ──────────────────────────────────────────────────
+  # Signals: logs + metrics + traces → line-b:4317 (OTLP gRPC)
+  device-line-b:
+    <<: *device-sim-base
+    container_name: mfg-device-line-b
+    environment:
+      LINE: "B"
+      LINE_NAME: "Line B"
+      MACHINE_TYPE: "CNC lathe"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "line-b:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAULT_RATE: ${FAULT_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+
+  # ── Line C — assembly robots ──────────────────────────────────────────────
+  # Signals: logs + metrics + traces → line-c:4317 (OTLP gRPC)
+  device-line-c:
+    <<: *device-sim-base
+    container_name: mfg-device-line-c
+    environment:
+      LINE: "C"
+      LINE_NAME: "Line C"
+      MACHINE_TYPE: "assembly robot"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "line-c:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAULT_RATE: ${FAULT_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+
+  # ── Packaging line machines ───────────────────────────────────────────────
+  # Signals: logs + metrics + traces → packaging:4317 (OTLP gRPC)
+  device-packaging:
+    <<: *device-sim-base
+    container_name: mfg-device-packaging
+    environment:
+      LINE: "pkg"
+      LINE_NAME: "Packaging"
+      MACHINE_TYPE: "packaging line"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "packaging:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAULT_RATE: ${FAULT_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+
+  # ── Utilities — HVAC/compressors ─────────────────────────────────────────
+  # Signals: logs + metrics + traces → utilities:4317 (OTLP gRPC)
+  device-utilities:
+    <<: *device-sim-base
+    container_name: mfg-device-utilities
+    environment:
+      LINE: "util"
+      LINE_NAME: "Utilities"
+      MACHINE_TYPE: "HVAC/compressor"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "utilities:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAULT_RATE: ${FAULT_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+
+# ════════════════════════════════════════════════════════════════════════════
+# NETWORK
+# ════════════════════════════════════════════════════════════════════════════
+
+networks:
+  factory:
+    driver: bridge

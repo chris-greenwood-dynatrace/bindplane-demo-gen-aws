@@ -1,0 +1,108 @@
+---
+# configurations.yaml — apply-ready BindPlane v1 Configuration resources for the manufacturing demo.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/configurations.yaml
+#
+# TWO Configurations cover all 6 collectors (collapsed 2-config model).
+# matchLabels use subset matching — collectors with EXTRA labels beyond the selector still match.
+#
+# Selector ↔ collector label verification:
+#   manufacturing-gateway: {role: gateway, demo: manufacturing}
+#     gateway.env  OPAMP_LABELS=role=gateway,demo=manufacturing,site=plant-1      MATCH (site= is extra)
+#
+#   manufacturing-edge: {role: edge, demo: manufacturing}   (each edge gets all 3 signals)
+#     line-a.env   OPAMP_LABELS=role=edge,demo=manufacturing,line=A     MATCH (line= is extra)
+#     line-b.env   OPAMP_LABELS=role=edge,demo=manufacturing,line=B     MATCH
+#     line-c.env   OPAMP_LABELS=role=edge,demo=manufacturing,line=C     MATCH
+#     packaging.env  OPAMP_LABELS=role=edge,demo=manufacturing,line=pkg   MATCH
+#     utilities.env  OPAMP_LABELS=role=edge,demo=manufacturing,line=util  MATCH
+#
+# NOTE: dynatrace_otlp destination handles delta temporality conversion internally —
+# no cumulativetodelta processor is required or available in the catalog.
+# NOTE: detectors=[system] only — docker is not a valid detector value in the catalog.
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: manufacturing-gateway
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: gateway
+      demo: manufacturing
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+        - name: http_port
+          value: 4318
+      processors:
+        - type: resource_detection_v2
+          parameters:
+            - name: detectors
+              value:
+                - system
+            - name: override
+              value: false
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+    - type: host
+      parameters:
+        - name: collection_interval
+          value: 60
+        - name: enable_process
+          value: false
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+  destinations:
+    - name: dynatrace-manufacturing
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: manufacturing-edge
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: edge
+      demo: manufacturing
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 512
+            - name: timeout
+              value: 5s
+  destinations:
+    - name: gateway-otlp-manufacturing

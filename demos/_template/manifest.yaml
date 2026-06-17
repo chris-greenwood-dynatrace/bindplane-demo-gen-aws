@@ -1,0 +1,56 @@
+# SINGLE SOURCE OF TRUTH for the <DEMO_NAME> demo.
+# Terraform (locals.tf) and scripts/ read ONLY this file; they never special-case a demo name.
+# See ../../CLAUDE.md for the demo contract + non-negotiable rules.
+# Replace ALL <DEMO_NAME> and <...> placeholders before deploying.
+
+name: <DEMO_NAME>
+display_name: "<DEMO_NAME> — <Human-Readable Title>"
+description: >
+  <One or two sentences describing what this demo shows.>
+business_variants: [<variant_1>, <variant_2>]   # Cosmetic relabeling only — same telemetry shape
+
+# ── Collector fleet (gateway/edge pattern). MUST be <= 10 (BindPlane free cap). ──
+# All collectors enroll to BindPlane with the SAME OpAMP endpoint+secret.
+# Per-collector OPAMP_LABELS differentiate them. BindPlane Configurations target subsets by these labels.
+# Labels here MUST equal collectors/<name>.env and selectors in bindplane/configurations.yaml.
+collectors:
+  total: 3   # gateway(1) + edges(2) = 3. Adjust as needed; max 10.
+  gateway:
+    name: gateway
+    represents: "<site/campus gateway — OTLP in from edges + trace app; OWNS the Dynatrace destination>"
+    labels:
+      role: gateway
+      demo: <DEMO_NAME>
+      site: <site-id>
+  edges:
+    - name: <edge-1-name>
+      represents: "<what this edge monitors>"
+      labels:
+        role: edge
+        demo: <DEMO_NAME>
+        zone: <zone-id>
+    - name: <edge-2-name>
+      represents: "<what this edge monitors>"
+      labels:
+        role: edge
+        demo: <DEMO_NAME>
+        zone: <zone-2-id>
+
+# ── Three-signal contract: each non-empty, each backed by a service in docker-compose.yaml. ──
+signals:
+  metrics: [<metrics-simulator-service-name>]   # e.g. sensor-publisher, hostmetrics
+  logs:    [<log-generator-service-name>]        # e.g. log-gen
+  traces:  [<trace-app-service-name>]            # e.g. trace-app
+
+# ── Volume / cadence guardrails (stay under 10 GB/day free cap). ──
+caps:
+  est_gb_per_day: 1.0   # conservative estimate; adjust after load testing
+  scrape_interval_s: 30  # must be >= 30
+
+# ── BDOT (BindPlane Distro for OpenTelemetry) collector image. PINNED — never :latest. ──
+# Confirm this tag against https://github.com/observIQ/bindplane-otel-collector/releases before deploy.
+bdot_image: "ghcr.io/observiq/bindplane-agent:1.101.2"
+
+# ── Wiring hints for scripts / compose (relative to this demo dir). ──
+compose_file: docker-compose.yaml
+bindplane_dir: bindplane

@@ -1,0 +1,32 @@
+# Secrets — NEVER commit
+.env
+*.tfvars
+!*.tfvars.example
+secrets.auto.tfvars
+*.pem
+*.key
+id_rsa*
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Docker / local
+*.log
+.DS_Store

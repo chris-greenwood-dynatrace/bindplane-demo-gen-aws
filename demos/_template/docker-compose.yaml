@@ -1,0 +1,112 @@
+# docker-compose.yaml for the <DEMO_NAME> demo.
+# This file is synced to /opt/demo/<DEMO_NAME>/ on the VM by scripts/up.sh.
+# Run with: sudo docker compose --env-file /opt/demo/.env up -d
+#
+# Env var sources:
+#   /opt/demo/.env       — secrets (BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_ENV_ID, DT_API_TOKEN)
+#   collectors/<name>.env — per-collector OPAMP_LABELS
+
+version: "3.9"
+
+x-bdot-base: &bdot-base
+  image: ghcr.io/observiq/bindplane-agent:1.101.2   # pinned; must match manifest.yaml bdot_image
+  restart: unless-stopped
+  environment:
+    # OpAMP enrollment — sourced from /opt/demo/.env (written by up.sh)
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  volumes:
+    - /var/log:/var/log:ro   # for filelog receiver
+
+services:
+
+  # ── Gateway collector — OTLP in from edges + trace app; exports to Dynatrace ──
+  gateway:
+    <<: *bdot-base
+    env_file:
+      - /opt/demo/.env                    # secrets
+      - collectors/gateway.env            # OPAMP_LABELS
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      DT_ENV_ID: ${DT_ENV_ID}            # used by BindPlane destination config
+      DT_API_TOKEN: ${DT_API_TOKEN}       # only the gateway needs the DT token
+    ports:
+      - "4317:4317"   # OTLP gRPC — edges + trace-app send here
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - demo
+
+  # ── Edge collector — forwards OTLP to gateway ──
+  edge-1:
+    <<: *bdot-base
+    env_file:
+      - /opt/demo/.env
+      - collectors/<edge-1-name>.env
+    networks:
+      - demo
+    depends_on:
+      - gateway
+
+  # ── Edge collector 2 (add more as needed, keep total <= 10) ──
+  edge-2:
+    <<: *bdot-base
+    env_file:
+      - /opt/demo/.env
+      - collectors/<edge-2-name>.env
+    networks:
+      - demo
+    depends_on:
+      - gateway
+
+  # ── Metrics simulator — emits OTLP metrics to the gateway ──
+  # Replace with your actual metrics source (Prometheus exporter, MQTT publisher, etc.)
+  metrics-sim:
+    image: python:3.12-slim          # replace with your sim image
+    restart: unless-stopped
+    command: python /app/metrics_sim.py
+    volumes:
+      - ./simulators:/app:ro
+    environment:
+      OTLP_ENDPOINT: "http://gateway:4318"
+      SCRAPE_INTERVAL_S: "30"
+      # Add demo-specific knobs here (sourced from .env.demo via --env-file if needed)
+    networks:
+      - demo
+    depends_on:
+      - gateway
+
+  # ── Log generator — emits structured logs consumed by edge or gateway ──
+  log-gen:
+    image: python:3.12-slim          # replace with your log gen image
+    restart: unless-stopped
+    command: python /app/log_gen.py
+    volumes:
+      - ./simulators:/app:ro
+    environment:
+      LOG_INTERVAL_S: "5"
+    networks:
+      - demo
+    depends_on:
+      - gateway
+
+  # ── Trace app — instrumented FastAPI / Flask app; emits traces via OTLP to gateway ──
+  trace-app:
+    image: python:3.12-slim          # replace with your trace-app image
+    restart: unless-stopped
+    command: python /app/trace_app.py
+    volumes:
+      - ./simulators:/app:ro
+    environment:
+      OTLP_ENDPOINT: "http://gateway:4318"
+      SERVICE_NAME: "<DEMO_NAME>-trace-app"
+    ports:
+      - "8080:8080"                  # optional: expose for live demo UI
+    networks:
+      - demo
+    depends_on:
+      - gateway
+
+networks:
+  demo:
+    driver: bridge
