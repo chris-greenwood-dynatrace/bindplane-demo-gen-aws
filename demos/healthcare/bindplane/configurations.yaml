@@ -1,0 +1,109 @@
+---
+# configurations.yaml — apply-ready BindPlane v1 Configuration resources for the healthcare demo.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/configurations.yaml
+#
+# TWO Configurations cover all 7 collectors (collapsed 2-config model).
+# matchLabels use subset matching — collectors with EXTRA labels beyond the selector still match.
+#
+# Selector ↔ collector label verification:
+#   healthcare-gateway: {role: gateway, demo: healthcare}
+#     gateway.env       OPAMP_LABELS=role=gateway,demo=healthcare,region=region-east-1     MATCH (region= is extra)
+#
+#   healthcare-edge: {role: edge, demo: healthcare}    (each edge gets all 3 signals)
+#     bedside.env       OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=bedside          MATCH (assetgroup= is extra)
+#     infusion.env      OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=infusion         MATCH
+#     imaging.env       OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=imaging          MATCH
+#     pharmacy.env      OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=pharmacy         MATCH
+#     ehr.env           OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=ehr              MATCH
+#     facility.env      OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=facility         MATCH
+#
+# NOTE: dynatrace_otlp destination handles delta temporality conversion internally —
+# no cumulativetodelta processor is required or available in the catalog.
+# NOTE: detectors=[system] only — docker is not a valid detector value in the catalog.
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: healthcare-gateway
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: gateway
+      demo: healthcare
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+        - name: http_port
+          value: 4318
+      processors:
+        - type: resource_detection_v2
+          parameters:
+            - name: detectors
+              value:
+                - system
+            - name: override
+              value: false
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+    - type: host
+      parameters:
+        - name: collection_interval
+          value: 60
+        - name: enable_process
+          value: false
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+  destinations:
+    - name: dynatrace-healthcare
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: healthcare-edge
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: edge
+      demo: healthcare
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 500
+            - name: timeout
+              value: 5s
+  destinations:
+    - name: gateway-otlp-healthcare

@@ -1,0 +1,266 @@
+# docker-compose.yaml — Healthcare demo: hospital edge fleet of BDOT collectors + unified asset simulators.
+# Run with: sudo docker compose --env-file /opt/demo/.env --env-file .env.demo up -d
+#
+# Env var sources:
+#   /opt/demo/.env   — secrets: BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_OTLP_ENDPOINT, DT_API_TOKEN
+#   .env.demo        — non-secret knobs: SCRAPE_INTERVAL_S, DEVICE_COUNT, FAILURE_RATE, INTENSITY
+#   collectors/*.env — per-collector OPAMP_LABELS only
+
+# Pinned BDOT image — must match manifest.yaml bdot_image.
+x-bdot-defaults: &bdot-base
+  image: ${BDOT_IMAGE:-ghcr.io/observiq/bindplane-agent:1.101.2}
+  restart: unless-stopped
+  environment:
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  networks:
+    - hospital
+
+# Shared device-sim build context (one image, six service instances).
+x-device-sim: &device-sim-base
+  build:
+    context: ./simulators/device-sim
+    dockerfile: Dockerfile
+  image: healthcare-device-sim:local
+  restart: unless-stopped
+  networks:
+    - hospital
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BDOT COLLECTORS — enroll to BindPlane Cloud over OpAMP.
+  # Pipelines are PUSHED by BindPlane (see bindplane/). Compose only enrolls agents.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Gateway collector ──────────────────────────────────────────────────────
+  # Receives OTLP from all edge collectors. Owns the Dynatrace destination.
+  # OTLP gRPC :4317 (internal) + HTTP :4318 (published to host for debugging).
+  gateway:
+    <<: *bdot-base
+    container_name: healthcare-gateway
+    env_file:
+      - collectors/gateway.env        # OPAMP_LABELS=role=gateway,demo=healthcare,region=region-east-1
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: gateway
+      DT_OTLP_ENDPOINT: ${DT_OTLP_ENDPOINT}   # Dynatrace OTLP base URL — used by destination
+      DT_API_TOKEN: ${DT_API_TOKEN}           # Only the gateway holds the DT token
+    ports:
+      - "4318:4318"                   # OTLP HTTP — exposed to host for debugging
+
+  # ── bedside edge collector — patient monitors (Philips / GE / Mindray) ─────
+  # Receives metrics + logs + traces from device-bedside over OTLP gRPC :4317.
+  bedside:
+    <<: *bdot-base
+    container_name: healthcare-bedside
+    env_file:
+      - collectors/bedside.env        # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=bedside
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: bedside
+    depends_on:
+      - gateway
+
+  # ── infusion edge collector — smart infusion pumps (Baxter / BD / ICU Med) ─
+  # Receives metrics + logs + traces from device-infusion over OTLP gRPC :4317.
+  infusion:
+    <<: *bdot-base
+    container_name: healthcare-infusion
+    env_file:
+      - collectors/infusion.env       # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=infusion
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: infusion
+    depends_on:
+      - gateway
+
+  # ── imaging edge collector — modalities (MRI / CT / X-ray / US) ────────────
+  # Receives metrics + logs + traces from device-imaging over OTLP gRPC :4317.
+  imaging:
+    <<: *bdot-base
+    container_name: healthcare-imaging
+    env_file:
+      - collectors/imaging.env        # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=imaging
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: imaging
+    depends_on:
+      - gateway
+
+  # ── pharmacy edge collector — ADCs + vaccine cold chain (Omnicell / Pyxis)
+  # Receives metrics + logs + traces from device-pharmacy over OTLP gRPC :4317.
+  # Cold-chain biologics + DEA controlled-substance diversion are SIGNATURE
+  # events of this demo — life-safety + regulatory.
+  pharmacy:
+    <<: *bdot-base
+    container_name: healthcare-pharmacy
+    env_file:
+      - collectors/pharmacy.env       # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=pharmacy
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: pharmacy
+    depends_on:
+      - gateway
+
+  # ── ehr edge collector — EHR workstations + clinical kiosks (Epic / Cerner)
+  # Receives metrics + logs + traces from device-ehr over OTLP gRPC :4317.
+  ehr:
+    <<: *bdot-base
+    container_name: healthcare-ehr
+    env_file:
+      - collectors/ehr.env            # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=ehr
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: ehr
+    depends_on:
+      - gateway
+
+  # ── facility edge collector — BMS (OR/iso pressure, HVAC, nurse call) ──────
+  # Receives metrics + logs + traces from device-facility over OTLP gRPC :4317.
+  facility:
+    <<: *bdot-base
+    container_name: healthcare-facility
+    env_file:
+      - collectors/facility.env       # OPAMP_LABELS=role=edge,demo=healthcare,assetgroup=facility
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: facility
+    depends_on:
+      - gateway
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ASSET SIMULATORS — one per asset group.
+  # Logs + metrics + traces: OTLP gRPC to the edge collector.
+  # Identical identity attributes on all 3 signals → one DT entity per asset.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── device-bedside — patient monitors → bedside:4317 ───────────────────────
+  # GROUP=bedside, ASSET_TYPE="patient monitor", VENDOR="Philips"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-bedside:
+    <<: *device-sim-base
+    container_name: healthcare-device-bedside
+    environment:
+      GROUP: bedside
+      GROUP_NAME: "Bedside Patient Monitors"
+      ASSET_TYPE: "patient monitor"
+      ASSET_VENDOR: "Philips"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "bedside:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - bedside
+
+  # ── device-infusion — smart infusion pumps → infusion:4317 ─────────────────
+  # GROUP=infusion, ASSET_TYPE="infusion pump", VENDOR="Baxter"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-infusion:
+    <<: *device-sim-base
+    container_name: healthcare-device-infusion
+    environment:
+      GROUP: infusion
+      GROUP_NAME: "Smart Infusion Pumps"
+      ASSET_TYPE: "infusion pump"
+      ASSET_VENDOR: "Baxter"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "infusion:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - infusion
+
+  # ── device-imaging — modalities (MRI / CT / X-ray) → imaging:4317 ──────────
+  # GROUP=imaging, ASSET_TYPE="imaging modality", VENDOR="Siemens"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-imaging:
+    <<: *device-sim-base
+    container_name: healthcare-device-imaging
+    environment:
+      GROUP: imaging
+      GROUP_NAME: "Imaging Modalities"
+      ASSET_TYPE: "imaging modality"
+      ASSET_VENDOR: "Siemens"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "imaging:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - imaging
+
+  # ── device-pharmacy — ADCs + vaccine cold chain → pharmacy:4317 ────────────
+  # GROUP=pharmacy, ASSET_TYPE="automated dispensing cabinet", VENDOR="Omnicell"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # Vaccine / biologics cold-chain story — temp excursions risk doses + lives.
+  device-pharmacy:
+    <<: *device-sim-base
+    container_name: healthcare-device-pharmacy
+    environment:
+      GROUP: pharmacy
+      GROUP_NAME: "Pharmacy ADCs & Vaccine Cold Chain"
+      ASSET_TYPE: "automated dispensing cabinet"
+      ASSET_VENDOR: "Omnicell"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "pharmacy:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - pharmacy
+
+  # ── device-ehr — EHR workstations + kiosks → ehr:4317 ───────────────────────
+  # GROUP=ehr, ASSET_TYPE="ehr workstation", VENDOR="Epic"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-ehr:
+    <<: *device-sim-base
+    container_name: healthcare-device-ehr
+    environment:
+      GROUP: ehr
+      GROUP_NAME: "EHR Workstations & Clinical Kiosks"
+      ASSET_TYPE: "ehr workstation"
+      ASSET_VENDOR: "Epic"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "ehr:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - ehr
+
+  # ── device-facility — BMS (OR/iso pressure, HVAC, nurse call) → facility:4317
+  # GROUP=facility, ASSET_TYPE="bms controller", VENDOR="Johnson Controls"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-facility:
+    <<: *device-sim-base
+    container_name: healthcare-device-facility
+    environment:
+      GROUP: facility
+      GROUP_NAME: "Facility BMS — OR / Isolation / HVAC / Nurse Call"
+      ASSET_TYPE: "bms controller"
+      ASSET_VENDOR: "Johnson Controls"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "facility:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - facility
+
+# ════════════════════════════════════════════════════════════════════════════
+# NETWORK
+# ════════════════════════════════════════════════════════════════════════════
+
+networks:
+  hospital:
+    driver: bridge
