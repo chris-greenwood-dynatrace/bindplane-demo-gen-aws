@@ -1,0 +1,29 @@
+---
+# fleets.yaml — apply-ready BindPlane v1 Fleet resources for the retail demo.
+# Applied automatically by scripts/up.sh (via bp-apply.sh → bindplane apply).
+#
+# In BindPlane's model a Fleet pairs ONE Configuration with a label selector — the matching
+# agents converge on that pipeline. Because this demo has TWO pipelines (gateway + edge) we
+# define TWO fleets, one per role. Both share demo=retail so the UI groups them together
+# under that label filter, but each fleet owns the right pipeline for its agents.
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: retail-gateway
+spec:
+  configuration: retail-gateway
+  selector:
+    matchLabels:
+      demo: retail
+      role: gateway
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Fleet
+metadata:
+  name: retail-edge
+spec:
+  configuration: retail-edge
+  selector:
+    matchLabels:
+      demo: retail
+      role: edge

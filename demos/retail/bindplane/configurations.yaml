@@ -1,0 +1,109 @@
+---
+# configurations.yaml — apply-ready BindPlane v1 Configuration resources for the retail demo.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/configurations.yaml
+#
+# TWO Configurations cover all 7 collectors (collapsed 2-config model).
+# matchLabels use subset matching — collectors with EXTRA labels beyond the selector still match.
+#
+# Selector ↔ collector label verification:
+#   retail-gateway: {role: gateway, demo: retail}
+#     gateway.env       OPAMP_LABELS=role=gateway,demo=retail,region=region-east-1     MATCH (region= is extra)
+#
+#   retail-edge: {role: edge, demo: retail}    (each edge gets all 3 signals)
+#     pos.env           OPAMP_LABELS=role=edge,demo=retail,assetgroup=pos              MATCH (assetgroup= is extra)
+#     payments.env      OPAMP_LABELS=role=edge,demo=retail,assetgroup=payments         MATCH
+#     inventory.env     OPAMP_LABELS=role=edge,demo=retail,assetgroup=inventory        MATCH
+#     fridge.env        OPAMP_LABELS=role=edge,demo=retail,assetgroup=fridge           MATCH
+#     network.env       OPAMP_LABELS=role=edge,demo=retail,assetgroup=network          MATCH
+#     digital.env       OPAMP_LABELS=role=edge,demo=retail,assetgroup=digital          MATCH
+#
+# NOTE: dynatrace_otlp destination handles delta temporality conversion internally —
+# no cumulativetodelta processor is required or available in the catalog.
+# NOTE: detectors=[system] only — docker is not a valid detector value in the catalog.
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: retail-gateway
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: gateway
+      demo: retail
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+        - name: http_port
+          value: 4318
+      processors:
+        - type: resource_detection_v2
+          parameters:
+            - name: detectors
+              value:
+                - system
+            - name: override
+              value: false
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+    - type: host
+      parameters:
+        - name: collection_interval
+          value: 60
+        - name: enable_process
+          value: false
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+  destinations:
+    - name: dynatrace-retail
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: retail-edge
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: edge
+      demo: retail
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 500
+            - name: timeout
+              value: 5s
+  destinations:
+    - name: gateway-otlp-retail

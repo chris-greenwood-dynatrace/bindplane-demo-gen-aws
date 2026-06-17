@@ -1,0 +1,264 @@
+# docker-compose.yaml — Retail demo: per-store edge fleet of BDOT collectors + unified asset simulators.
+# Run with: sudo docker compose --env-file /opt/demo/.env --env-file .env.demo up -d
+#
+# Env var sources:
+#   /opt/demo/.env   — secrets: BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_OTLP_ENDPOINT, DT_API_TOKEN
+#   .env.demo        — non-secret knobs: SCRAPE_INTERVAL_S, DEVICE_COUNT, FAILURE_RATE, INTENSITY
+#   collectors/*.env — per-collector OPAMP_LABELS only
+
+# Pinned BDOT image — must match manifest.yaml bdot_image.
+x-bdot-defaults: &bdot-base
+  image: ${BDOT_IMAGE:-ghcr.io/observiq/bindplane-agent:1.101.2}
+  restart: unless-stopped
+  environment:
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  networks:
+    - store
+
+# Shared device-sim build context (one image, six service instances).
+x-device-sim: &device-sim-base
+  build:
+    context: ./simulators/device-sim
+    dockerfile: Dockerfile
+  image: retail-device-sim:local
+  restart: unless-stopped
+  networks:
+    - store
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BDOT COLLECTORS — enroll to BindPlane Cloud over OpAMP.
+  # Pipelines are PUSHED by BindPlane (see bindplane/). Compose only enrolls agents.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Gateway collector ──────────────────────────────────────────────────────
+  # Receives OTLP from all edge collectors. Owns the Dynatrace destination.
+  # OTLP gRPC :4317 (internal) + HTTP :4318 (published to host for debugging).
+  gateway:
+    <<: *bdot-base
+    container_name: retail-gateway
+    env_file:
+      - collectors/gateway.env        # OPAMP_LABELS=role=gateway,demo=retail,region=region-east-1
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: gateway
+      DT_OTLP_ENDPOINT: ${DT_OTLP_ENDPOINT}   # Dynatrace OTLP base URL — used by destination
+      DT_API_TOKEN: ${DT_API_TOKEN}           # Only the gateway holds the DT token
+    ports:
+      - "4318:4318"                   # OTLP HTTP — exposed to host for debugging
+
+  # ── pos edge collector — POS terminals fleet (NCR / Toshiba / Verifone) ────
+  # Receives metrics + logs + traces from device-pos over OTLP gRPC :4317.
+  pos:
+    <<: *bdot-base
+    container_name: retail-pos
+    env_file:
+      - collectors/pos.env            # OPAMP_LABELS=role=edge,demo=retail,assetgroup=pos
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: pos
+    depends_on:
+      - gateway
+
+  # ── payments edge collector — payment terminals + gateway (EMV auth path) ──
+  # Receives metrics + logs + traces from device-payments over OTLP gRPC :4317.
+  payments:
+    <<: *bdot-base
+    container_name: retail-payments
+    env_file:
+      - collectors/payments.env       # OPAMP_LABELS=role=edge,demo=retail,assetgroup=payments
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: payments
+    depends_on:
+      - gateway
+
+  # ── inventory edge collector — RFID + handheld scanners (backroom + floor) ─
+  # Receives metrics + logs + traces from device-inventory over OTLP gRPC :4317.
+  inventory:
+    <<: *bdot-base
+    container_name: retail-inventory
+    env_file:
+      - collectors/inventory.env      # OPAMP_LABELS=role=edge,demo=retail,assetgroup=inventory
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: inventory
+    depends_on:
+      - gateway
+
+  # ── fridge edge collector — refrigeration + HVAC (cold chain / food safety)
+  # Receives metrics + logs + traces from device-fridge over OTLP gRPC :4317.
+  fridge:
+    <<: *bdot-base
+    container_name: retail-fridge
+    env_file:
+      - collectors/fridge.env         # OPAMP_LABELS=role=edge,demo=retail,assetgroup=fridge
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: fridge
+    depends_on:
+      - gateway
+
+  # ── network edge collector — in-store Wi-Fi + WAN (Meraki / Aruba) ─────────
+  # Receives metrics + logs + traces from device-network over OTLP gRPC :4317.
+  network:
+    <<: *bdot-base
+    container_name: retail-network
+    env_file:
+      - collectors/network.env        # OPAMP_LABELS=role=edge,demo=retail,assetgroup=network
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: network
+    depends_on:
+      - gateway
+
+  # ── digital edge collector — e-commerce + mobile app (checkout/cart/search)
+  # Receives metrics + logs + traces from device-digital over OTLP gRPC :4317.
+  digital:
+    <<: *bdot-base
+    container_name: retail-digital
+    env_file:
+      - collectors/digital.env        # OPAMP_LABELS=role=edge,demo=retail,assetgroup=digital
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: digital
+    depends_on:
+      - gateway
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ASSET SIMULATORS — one per asset group.
+  # Logs + metrics + traces: OTLP gRPC to the edge collector.
+  # Identical identity attributes on all 3 signals → one DT entity per asset.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── device-pos — POS terminals → pos:4317 ──────────────────────────────────
+  # GROUP=pos, ASSET_TYPE="pos terminal", VENDOR="NCR"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-pos:
+    <<: *device-sim-base
+    container_name: retail-device-pos
+    environment:
+      GROUP: pos
+      GROUP_NAME: "POS Terminals"
+      ASSET_TYPE: "pos terminal"
+      ASSET_VENDOR: "NCR"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "pos:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - pos
+
+  # ── device-payments — payment terminals + gateway → payments:4317 ──────────
+  # GROUP=payments, ASSET_TYPE="payment terminal", VENDOR="Ingenico"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-payments:
+    <<: *device-sim-base
+    container_name: retail-device-payments
+    environment:
+      GROUP: payments
+      GROUP_NAME: "Payment Terminals & Gateway"
+      ASSET_TYPE: "payment terminal"
+      ASSET_VENDOR: "Ingenico"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "payments:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - payments
+
+  # ── device-inventory — RFID + handheld scanners → inventory:4317 ────────────
+  # GROUP=inventory, ASSET_TYPE="rfid scanner", VENDOR="Zebra"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-inventory:
+    <<: *device-sim-base
+    container_name: retail-device-inventory
+    environment:
+      GROUP: inventory
+      GROUP_NAME: "Inventory & RFID Scanners"
+      ASSET_TYPE: "rfid scanner"
+      ASSET_VENDOR: "Zebra"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "inventory:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - inventory
+
+  # ── device-fridge — refrigeration + HVAC → fridge:4317 ──────────────────────
+  # GROUP=fridge, ASSET_TYPE="refrigeration unit", VENDOR="Emerson"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # Cold-chain / food-safety story — temp excursions are CRITICAL events.
+  device-fridge:
+    <<: *device-sim-base
+    container_name: retail-device-fridge
+    environment:
+      GROUP: fridge
+      GROUP_NAME: "Refrigeration & HVAC"
+      ASSET_TYPE: "refrigeration unit"
+      ASSET_VENDOR: "Emerson"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "fridge:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - fridge
+
+  # ── device-network — in-store Wi-Fi + WAN → network:4317 ────────────────────
+  # GROUP=network, ASSET_TYPE="wireless ap", VENDOR="Meraki"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-network:
+    <<: *device-sim-base
+    container_name: retail-device-network
+    environment:
+      GROUP: network
+      GROUP_NAME: "In-Store Wi-Fi & WAN"
+      ASSET_TYPE: "wireless ap"
+      ASSET_VENDOR: "Meraki"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "network:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - network
+
+  # ── device-digital — e-commerce + mobile app → digital:4317 ─────────────────
+  # GROUP=digital, ASSET_TYPE="ecom node", VENDOR="Shopify"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-digital:
+    <<: *device-sim-base
+    container_name: retail-device-digital
+    environment:
+      GROUP: digital
+      GROUP_NAME: "E-commerce & Mobile App"
+      ASSET_TYPE: "ecom node"
+      ASSET_VENDOR: "Shopify"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "digital:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - digital
+
+# ════════════════════════════════════════════════════════════════════════════
+# NETWORK
+# ════════════════════════════════════════════════════════════════════════════
+
+networks:
+  store:
+    driver: bridge
