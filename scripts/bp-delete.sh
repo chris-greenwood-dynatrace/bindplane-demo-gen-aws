@@ -7,9 +7,11 @@
 # Running scripts/up.sh --demo <name> is idempotent; configurations will be updated
 # on the next apply even if they already exist from a prior run.
 #
-# What is deleted:
-#   • Each Configuration named in demos/<demo>/bindplane/configurations.yaml
-#   • Each Destination named in demos/<demo>/bindplane/destinations.yaml
+# What is deleted (in dependency order):
+#   1. Agents matched by selector demo=<demo>      (must be removed before Fleets)
+#   2. Each Fleet named in demos/<demo>/bindplane/fleets.yaml
+#   3. Each Configuration named in demos/<demo>/bindplane/configurations.yaml
+#   4. Each Destination named in demos/<demo>/bindplane/destinations.yaml
 # Sources are inline in configurations; nothing separate to delete.
 # Individual not-found errors are warned but do not fail the script.
 #
@@ -107,12 +109,38 @@ delete_resource() {
   fi
 }
 
+# ── delete_agents_by_demo <demo> ──────────────────────────────────────────────
+# Deletes ALL agents (any status) carrying the label demo=<demo>. The bindplane
+# CLI requires agents to be removed before their parent Fleet can be deleted.
+# Uses --limit 0 (no limit) so concentrator/AMI-style demos with many collectors
+# are fully cleaned. "No agents found" / "404" are warned, not failed.
+delete_agents_by_demo() {
+  local demo="$1"
+  info "Deleting BindPlane agents with selector 'demo=$demo'..."
+  local del_output del_rc
+  del_rc=0
+  del_output="$(bp_cli delete agents --selector "demo=$demo" --limit 0 2>&1)" || del_rc=$?
+  if (( del_rc != 0 )); then
+    if printf '%s\n' "$del_output" | grep -qiE 'not found|404|does not exist|no agents'; then
+      warn "  No agents found for demo '$demo' — already deleted or never enrolled. Skipping."
+    else
+      warn "  Failed to delete agents for demo '$demo' (exit $del_rc): $del_output"
+      warn "  Continuing cleanup despite this error. Fleet deletion may fail if agents remain."
+    fi
+  else
+    info "  Agents deleted. $del_output"
+  fi
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 info "━━━ BindPlane Delete (best-effort cleanup, via CLI): demo=$DEMO ━━━"
-warn "This removes BindPlane Configurations and Destinations for demo '$DEMO'."
+warn "This removes BindPlane Agents, Fleets, Configurations, and Destinations for demo '$DEMO'."
 warn "Re-running 'scripts/up.sh --demo $DEMO' will re-apply them automatically."
 
-# Delete Fleets first (organizational views; no dependents)
+# Delete Agents FIRST — Fleets cannot be deleted while agents reference them.
+delete_agents_by_demo "$DEMO"
+
+# Delete Fleets next (organizational views; depend on agents being gone)
 if [[ -f "$FLEETS_YAML" ]]; then
   info "Reading Fleet names from fleets.yaml..."
   fleet_names="$(yq ea 'select(.kind == "Fleet") | .metadata.name' "$FLEETS_YAML" 2>/dev/null || true)"

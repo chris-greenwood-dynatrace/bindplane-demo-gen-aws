@@ -1,0 +1,109 @@
+---
+# configurations.yaml — apply-ready BindPlane v1 Configuration resources for the energy demo.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/configurations.yaml
+#
+# TWO Configurations cover all 7 collectors (collapsed 2-config model).
+# matchLabels use subset matching — collectors with EXTRA labels beyond the selector still match.
+#
+# Selector ↔ collector label verification:
+#   energy-gateway: {role: gateway, demo: energy}
+#     gateway.env       OPAMP_LABELS=role=gateway,demo=energy,region=region-east-1   MATCH (region= is extra)
+#
+#   energy-edge: {role: edge, demo: energy}    (each edge gets all 3 signals)
+#     substations.env   OPAMP_LABELS=role=edge,demo=energy,assetgroup=substation     MATCH (assetgroup= is extra)
+#     transformers.env  OPAMP_LABELS=role=edge,demo=energy,assetgroup=transformer    MATCH
+#     feeders.env       OPAMP_LABELS=role=edge,demo=energy,assetgroup=feeder         MATCH
+#     meters.env        OPAMP_LABELS=role=edge,demo=energy,assetgroup=meter          MATCH
+#     generation.env    OPAMP_LABELS=role=edge,demo=energy,assetgroup=gen            MATCH
+#     scada.env         OPAMP_LABELS=role=edge,demo=energy,assetgroup=scada          MATCH
+#
+# NOTE: dynatrace_otlp destination handles delta temporality conversion internally —
+# no cumulativetodelta processor is required or available in the catalog.
+# NOTE: detectors=[system] only — docker is not a valid detector value in the catalog.
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: energy-gateway
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: gateway
+      demo: energy
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+        - name: http_port
+          value: 4318
+      processors:
+        - type: resource_detection_v2
+          parameters:
+            - name: detectors
+              value:
+                - system
+            - name: override
+              value: false
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+    - type: host
+      parameters:
+        - name: collection_interval
+          value: 60
+        - name: enable_process
+          value: false
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 1000
+            - name: timeout
+              value: 10s
+  destinations:
+    - name: dynatrace-energy
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Configuration
+metadata:
+  name: energy-edge
+  labels:
+    platform: linux
+spec:
+  selector:
+    matchLabels:
+      role: edge
+      demo: energy
+  sources:
+    - type: otlp
+      parameters:
+        - name: telemetry_types
+          value:
+            - Metrics
+            - Logs
+            - Traces
+        - name: listen_address
+          value: "0.0.0.0"
+        - name: grpc_port
+          value: 4317
+      processors:
+        - type: batch
+          parameters:
+            - name: send_batch_size
+              value: 500
+            - name: timeout
+              value: 5s
+  destinations:
+    - name: gateway-otlp-energy

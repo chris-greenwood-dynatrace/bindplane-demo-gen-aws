@@ -1,0 +1,69 @@
+# SINGLE SOURCE OF TRUTH for the energy demo.
+# Terraform (locals.tf) and scripts/ read ONLY this file; they never special-case a demo name.
+# See ../../CLAUDE.md for the demo contract + non-negotiable rules.
+
+name: energy
+display_name: "Energy — Grid Substation & Generation Fleet"
+description: >
+  BindPlane managing a fleet of OpenTelemetry collectors across an electric utility's grid: HV
+  substations, distribution transformers, feeders/reclosers, AMI smart-meter concentrators,
+  generation assets (solar/wind/battery/gas peaker), and SCADA RTUs. Each simulated asset emits
+  ALL THREE signals (metrics + logs + traces) over OTLP with identical resource attributes, so
+  every asset correlates into one Dynatrace entity. Reusable across IOU, co-op, municipal, T&D,
+  and ISO/RTO operations via business_variants.
+business_variants: [iou, coop, municipal, td_only, iso_rto]
+
+# ── Collector fleet (agent/gateway pattern). MUST be <= 10 (BindPlane free cap). ──
+# Same labeling scheme as the manufacturing/networking demos so config-targeting is consistent
+# across demos: role=gateway|edge, demo=energy, assetgroup=<group>. Labels here MUST equal
+#   demos/energy/collectors/<name>.env and the selectors in bindplane/configurations.yaml.
+#
+# Per-asset unified-signals model: each edge collector receives metrics+logs+traces (all OTLP)
+# from the assets it monitors, then forwards to the gateway. No signal-split collectors.
+collectors:
+  total: 7
+  gateway:
+    name: gateway
+    represents: "Control-center gateway — OTLP in from edges + host metrics; OWNS the Dynatrace destination"
+    labels: { role: gateway, demo: energy, region: region-east-1 }
+  edges:
+    - name: substations
+      represents: "HV substations — breakers + protection relays (SEL); emit metrics+logs+traces via OTLP"
+      labels: { role: edge, demo: energy, assetgroup: substation }
+    - name: transformers
+      represents: "Distribution transformers (ABB) — oil/winding temps, LTC tap, load"
+      labels: { role: edge, demo: energy, assetgroup: transformer }
+    - name: feeders
+      represents: "Feeder lines + reclosers + capacitor banks (S&C)"
+      labels: { role: edge, demo: energy, assetgroup: feeder }
+    - name: meters
+      represents: "AMI smart-meter concentrators (Itron) — meter availability, outages, reads"
+      labels: { role: edge, demo: energy, assetgroup: meter }
+    - name: generation
+      represents: "Generation assets — solar/wind/battery/gas peaker (GE)"
+      labels: { role: edge, demo: energy, assetgroup: gen }
+    - name: scada
+      represents: "SCADA RTUs / control gateways (Hitachi) — DNP3 polls, command success"
+      labels: { role: edge, demo: energy, assetgroup: scada }
+
+# ── Three-signal contract: each non-empty, each backed by a simulator service in docker-compose. ──
+# Every device-sim service emits ALL THREE signals, so the same services appear under each key.
+signals:
+  metrics: [device-substation, device-transformer, device-feeder, device-meter, device-gen, device-scada]
+  logs:    [device-substation, device-transformer, device-feeder, device-meter, device-gen, device-scada]
+  traces:  [device-substation, device-transformer, device-feeder, device-meter, device-gen, device-scada]
+
+# ── Volume / cadence guardrails (stay under 10 GB/day free cap). ──
+caps:
+  est_gb_per_day: 5.0
+  scrape_interval_s: 30
+
+# ── BDOT (BindPlane Distro for OpenTelemetry) collector image. PINNED — never :latest. ──
+bdot_image: "ghcr.io/observiq/bindplane-agent:1.101.2"
+
+# ── Optional: recommended VM size override (read by terraform locals as vm_size_hint). ──
+vm_size_hint: "Standard_B2ms"
+
+# ── Wiring hints for scripts / compose (relative to this demo dir). ──
+compose_file: docker-compose.yaml
+bindplane_dir: bindplane

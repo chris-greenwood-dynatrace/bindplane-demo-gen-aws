@@ -1,0 +1,47 @@
+---
+# destinations.yaml — apply-ready BindPlane v1 Destination resources for the energy demo.
+# Applied automatically by scripts/up.sh via: bindplane apply -f bindplane/destinations.yaml
+# Do NOT inline real secrets — DT_OTLP_ENDPOINT and DT_API_TOKEN come from .env (substituted at apply).
+# deployment_type=Custom + custom_url works for ANY tenant (Gen3/SaaS/sprint/managed) — set the full
+# OTLP base URL (…/api/v2/otlp) in DT_OTLP_ENDPOINT. Standard SaaS = https://<envid>.live.dynatrace.com/api/v2/otlp.
+apiVersion: bindplane.observiq.com/v1
+kind: Destination
+metadata:
+  name: dynatrace-energy
+  labels:
+    platform: linux
+spec:
+  type: dynatrace_otlp
+  parameters:
+    - name: telemetry_types
+      value:
+        - Metrics
+        - Logs
+        - Traces
+    - name: deployment_type
+      value: Custom
+    - name: custom_url
+      value: "${DT_OTLP_ENDPOINT}"
+    - name: dynatrace_api_token
+      value: "${DT_API_TOKEN}"
+---
+apiVersion: bindplane.observiq.com/v1
+kind: Destination
+metadata:
+  name: gateway-otlp-energy
+  labels:
+    platform: linux
+spec:
+  type: otlp_grpc
+  parameters:
+    - name: telemetry_types
+      value:
+        - Metrics
+        - Logs
+        - Traces
+    - name: hostname
+      value: "gateway"
+    - name: grpc_port
+      value: 4317
+    - name: protocol
+      value: grpc

@@ -15,9 +15,10 @@ Tear down the running demo environment on Azure.
 
 Options:
   --demo <name>        Demo name to destroy (inferred from Terraform state if omitted)
-  --purge-bindplane    Also delete BindPlane Configurations and Destinations for this demo.
-                       Default: OFF — configs persist server-side and are re-applied on next up.sh.
-                       Use this only if you want a fully clean BindPlane project.
+  --purge-bindplane    Also delete BindPlane Agents, Fleets, Configurations, and Destinations
+                       for this demo (in dependency order). Default: OFF — these resources
+                       persist server-side and are re-applied on next up.sh. Use this only if
+                       you want a fully clean BindPlane project.
   -h, --help           Show this help message
 
 Examples:
@@ -136,10 +137,11 @@ tf destroy -auto-approve -var "demo=$DEMO"
 info "Resource group destroyed. Azure resources are gone."
 info ""
 if [[ "$PURGE_BINDPLANE" == "true" ]]; then
-  info "BindPlane Configurations and Destinations for demo '$DEMO' were also deleted."
+  info "BindPlane Agents, Fleets, Configurations, and Destinations for demo '$DEMO' were also deleted."
 else
-  info "NOTE: BindPlane Configurations for demo '$DEMO' persist server-side (intended)."
-  info "      They will be re-applied automatically on next 'scripts/up.sh --demo $DEMO'."
+  info "NOTE: BindPlane Agents, Fleets, Configurations, and Destinations for demo '$DEMO'"
+  info "      persist server-side (intended). Disconnected agents and configs will be"
+  info "      re-used on next 'scripts/up.sh --demo $DEMO'."
   info "      To remove them now: scripts/bp-delete.sh --demo $DEMO"
   info "      Or: scripts/down.sh --demo $DEMO --purge-bindplane"
 fi

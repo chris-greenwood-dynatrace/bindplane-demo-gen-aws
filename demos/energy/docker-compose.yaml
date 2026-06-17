@@ -1,0 +1,264 @@
+# docker-compose.yaml — Energy demo: grid asset fleet of BDOT collectors + unified asset simulators.
+# Run with: sudo docker compose --env-file /opt/demo/.env --env-file .env.demo up -d
+#
+# Env var sources:
+#   /opt/demo/.env   — secrets: BP_OPAMP_ENDPOINT, BP_SECRET_KEY, DT_OTLP_ENDPOINT, DT_API_TOKEN
+#   .env.demo        — non-secret knobs: SCRAPE_INTERVAL_S, DEVICE_COUNT, FAILURE_RATE, INTENSITY
+#   collectors/*.env — per-collector OPAMP_LABELS only
+
+# Pinned BDOT image — must match manifest.yaml bdot_image.
+x-bdot-defaults: &bdot-base
+  image: ${BDOT_IMAGE:-ghcr.io/observiq/bindplane-agent:1.101.2}
+  restart: unless-stopped
+  environment:
+    OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+    OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+  networks:
+    - grid
+
+# Shared device-sim build context (one image, six service instances).
+x-device-sim: &device-sim-base
+  build:
+    context: ./simulators/device-sim
+    dockerfile: Dockerfile
+  image: energy-device-sim:local
+  restart: unless-stopped
+  networks:
+    - grid
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BDOT COLLECTORS — enroll to BindPlane Cloud over OpAMP.
+  # Pipelines are PUSHED by BindPlane (see bindplane/). Compose only enrolls agents.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Gateway collector ──────────────────────────────────────────────────────
+  # Receives OTLP from all edge collectors. Owns the Dynatrace destination.
+  # OTLP gRPC :4317 (internal) + HTTP :4318 (published to host for debugging).
+  gateway:
+    <<: *bdot-base
+    container_name: energy-gateway
+    env_file:
+      - collectors/gateway.env        # OPAMP_LABELS=role=gateway,demo=energy,region=region-east-1
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: gateway
+      DT_ENV_ID: ${DT_ENV_ID}         # Dynatrace env — used by BindPlane destination config
+      DT_API_TOKEN: ${DT_API_TOKEN}   # Only the gateway holds the DT token
+    ports:
+      - "4318:4318"                   # OTLP HTTP — exposed to host for debugging
+
+  # ── substations edge collector — HV substations, breakers, protection relays ────
+  # Receives metrics + logs + traces from device-substation over OTLP gRPC :4317.
+  substations:
+    <<: *bdot-base
+    container_name: energy-substations
+    env_file:
+      - collectors/substations.env    # OPAMP_LABELS=role=edge,demo=energy,assetgroup=substation
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: substations
+    depends_on:
+      - gateway
+
+  # ── transformers edge collector — distribution transformers + LTC ────────────
+  # Receives metrics + logs + traces from device-transformer over OTLP gRPC :4317.
+  transformers:
+    <<: *bdot-base
+    container_name: energy-transformers
+    env_file:
+      - collectors/transformers.env   # OPAMP_LABELS=role=edge,demo=energy,assetgroup=transformer
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: transformers
+    depends_on:
+      - gateway
+
+  # ── feeders edge collector — feeder lines + reclosers + capacitor banks ─────
+  # Receives metrics + logs + traces from device-feeder over OTLP gRPC :4317.
+  feeders:
+    <<: *bdot-base
+    container_name: energy-feeders
+    env_file:
+      - collectors/feeders.env        # OPAMP_LABELS=role=edge,demo=energy,assetgroup=feeder
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: feeders
+    depends_on:
+      - gateway
+
+  # ── meters edge collector — AMI smart-meter concentrators ──────────────────
+  # Receives metrics + logs + traces from device-meter over OTLP gRPC :4317.
+  meters:
+    <<: *bdot-base
+    container_name: energy-meters
+    env_file:
+      - collectors/meters.env         # OPAMP_LABELS=role=edge,demo=energy,assetgroup=meter
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: meters
+    depends_on:
+      - gateway
+
+  # ── generation edge collector — solar/wind/battery/gas peaker ───────────────
+  # Receives metrics + logs + traces from device-gen over OTLP gRPC :4317.
+  generation:
+    <<: *bdot-base
+    container_name: energy-generation
+    env_file:
+      - collectors/generation.env     # OPAMP_LABELS=role=edge,demo=energy,assetgroup=gen
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: generation
+    depends_on:
+      - gateway
+
+  # ── scada edge collector — SCADA RTUs / control gateways ────────────────────
+  # Receives metrics + logs + traces from device-scada over OTLP gRPC :4317.
+  scada:
+    <<: *bdot-base
+    container_name: energy-scada
+    env_file:
+      - collectors/scada.env          # OPAMP_LABELS=role=edge,demo=energy,assetgroup=scada
+    environment:
+      OPAMP_ENDPOINT: ${BP_OPAMP_ENDPOINT}
+      OPAMP_SECRET_KEY: ${BP_SECRET_KEY}
+      OPAMP_AGENT_NAME: scada
+    depends_on:
+      - gateway
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ASSET SIMULATORS — one per asset group.
+  # Logs + metrics + traces: OTLP gRPC to the edge collector.
+  # Identical identity attributes on all 3 signals → one DT entity per asset.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── device-substation — HV substations → substations:4317 ──────────────────
+  # GROUP=substation, ASSET_TYPE="hv substation", VENDOR="SEL"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-substation:
+    <<: *device-sim-base
+    container_name: energy-device-substation
+    environment:
+      GROUP: substation
+      GROUP_NAME: "HV Substations"
+      ASSET_TYPE: "hv substation"
+      ASSET_VENDOR: "SEL"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "substations:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - substations
+
+  # ── device-transformer — distribution transformers → transformers:4317 ─────
+  # GROUP=transformer, ASSET_TYPE="distribution transformer", VENDOR="ABB"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-transformer:
+    <<: *device-sim-base
+    container_name: energy-device-transformer
+    environment:
+      GROUP: transformer
+      GROUP_NAME: "Distribution Transformers"
+      ASSET_TYPE: "distribution transformer"
+      ASSET_VENDOR: "ABB"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "transformers:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - transformers
+
+  # ── device-feeder — feeders + reclosers + capacitor banks → feeders:4317 ──
+  # GROUP=feeder, ASSET_TYPE="feeder/recloser", VENDOR="S&C"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-feeder:
+    <<: *device-sim-base
+    container_name: energy-device-feeder
+    environment:
+      GROUP: feeder
+      GROUP_NAME: "Feeders & Reclosers"
+      ASSET_TYPE: "feeder/recloser"
+      ASSET_VENDOR: "S&C"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "feeders:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - feeders
+
+  # ── device-meter — AMI concentrators → meters:4317 ──────────────────────────
+  # GROUP=meter, ASSET_TYPE="ami concentrator", VENDOR="Itron"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-meter:
+    <<: *device-sim-base
+    container_name: energy-device-meter
+    environment:
+      GROUP: meter
+      GROUP_NAME: "AMI Smart-Meter Concentrators"
+      ASSET_TYPE: "ami concentrator"
+      ASSET_VENDOR: "Itron"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "meters:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - meters
+
+  # ── device-gen — generation assets → generation:4317 ─────────────────────────
+  # GROUP=gen, ASSET_TYPE="generation asset", VENDOR="GE"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  # Mixed asset types within: solar, wind, battery, gas peaker.
+  device-gen:
+    <<: *device-sim-base
+    container_name: energy-device-gen
+    environment:
+      GROUP: gen
+      GROUP_NAME: "Generation Assets"
+      ASSET_TYPE: "generation asset"
+      ASSET_VENDOR: "GE"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "generation:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - generation
+
+  # ── device-scada — SCADA RTUs → scada:4317 ──────────────────────────────────
+  # GROUP=scada, ASSET_TYPE="scada rtu", VENDOR="Hitachi"
+  # Signals: logs + metrics + traces → OTLP gRPC
+  device-scada:
+    <<: *device-sim-base
+    container_name: energy-device-scada
+    environment:
+      GROUP: scada
+      GROUP_NAME: "SCADA RTUs"
+      ASSET_TYPE: "scada rtu"
+      ASSET_VENDOR: "Hitachi"
+      DEVICE_COUNT: ${DEVICE_COUNT:-3}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "scada:4317"
+      SCRAPE_INTERVAL_S: ${SCRAPE_INTERVAL_S:-30}
+      FAILURE_RATE: ${FAILURE_RATE:-0.08}
+      INTENSITY: ${INTENSITY:-2}
+    depends_on:
+      - scada
+
+# ════════════════════════════════════════════════════════════════════════════
+# NETWORK
+# ════════════════════════════════════════════════════════════════════════════
+
+networks:
+  grid:
+    driver: bridge

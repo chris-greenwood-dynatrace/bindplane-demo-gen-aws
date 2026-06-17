@@ -9,6 +9,7 @@ through BindPlane to Dynatrace. One demo runs at a time, selected at spin-up.
 |---|---|---|
 | `manufacturing` | 6 | Factory machine fleet — production lines, packaging, plant utilities. Each device emits metrics+logs+traces (per-device unified signals). Reusable across automotive / food&bev / pharma / electronics / metals. |
 | `networking` | 5 | NOC device fleet — core/edge routers & switches, firewalls, load balancers. Each device emits metrics+logs+traces via OTLP. Reusable across enterprise / ISP / campus / datacenter / retail-WAN. |
+| `energy` | 7 | Grid asset fleet — HV substations (SEL relays), distribution transformers (ABB), feeders + reclosers (S&C), AMI smart-meter concentrators (Itron), generation (solar/wind/battery/gas peaker, GE), and SCADA RTUs (Hitachi). Every asset emits metrics+logs+traces with one entity per asset. Reusable across IOU / co-op / municipal / T&D-only / ISO-RTO. |
 
 > All device/machine telemetry is **simulator-generated** (industrial + network protocols have no
 > first-class BindPlane source). The demo authentically shows BindPlane *managing collectors and
@@ -31,7 +32,7 @@ scripts/up.sh --demo <name>
   → BindPlane pushes pipelines to matching collectors (~60s OpAMP heartbeat)
   → gateway collector exports via dynatrace_otlp destination → Dynatrace
 scripts/down.sh  → drains collectors (frees the cap) → terraform destroy (atomic)
-scripts/down.sh --purge-bindplane  → also removes BindPlane Configurations + Destinations
+scripts/down.sh --purge-bindplane  → also removes BindPlane Agents, Fleets, Configurations, and Destinations
 ```
 
 Pipelines are **applied automatically** by `up.sh` via the **`bindplane` CLI** (local prerequisite
@@ -87,6 +88,7 @@ Pipelines are applied automatically — no UI build step required. The runbooks 
 
 - Manufacturing: [demos/manufacturing/bindplane/rollout.md](demos/manufacturing/bindplane/rollout.md)
 - Networking: [demos/networking/bindplane/rollout.md](demos/networking/bindplane/rollout.md)
+- Energy: [demos/energy/bindplane/rollout.md](demos/energy/bindplane/rollout.md)
 
 The live Rollout step (edit a processor in the UI → roll out to a labeled subset → watch agents
 converge → show data change in Dynatrace) is the highest-impact demo moment.
@@ -94,9 +96,9 @@ converge → show data change in Dynatrace) is the highest-impact demo moment.
 ### 4. Verify in Dynatrace
 
 Confirm all three signals arrived (DQL or the dt-obs-* tooling):
-- **Metrics** — machine temp/vibration/OEE (mfg) or interface octets/CPU/sessions (net), by line/devgroup.
-- **Logs** — machine alarms (mfg) or device syslog (net).
-- **Traces** — MES job execution (mfg) or network provisioning (net).
+- **Metrics** — machine temp/vibration/OEE (mfg) · interface octets/CPU/sessions (net) · substation voltage_kv, transformer oil_temp_c, feeder load_amps, gen output_mw, battery soc_pct, scada poll_latency_ms (energy).
+- **Logs** — machine alarms (mfg) · device syslog (net) · SEL relay trips, oil-temp warnings, recloser ops, AMI comm failures, RTU heartbeat losses (energy).
+- **Traces** — MES job execution (mfg) · network provisioning (net) · grid_operation (fault_isolation / load_shed / restoration / dispatch) for energy.
 
 ---
 
@@ -109,6 +111,13 @@ Confirm all three signals arrived (DQL or the dt-obs-* tooling):
 Drains the collectors over SSH first (so they disconnect and **free the 10-collector cap
 immediately**), then `terraform destroy` removes the resource group. The BindPlane Configurations
 remain in your project by design — they're reused on the next spin-up.
+
+Add `--purge-bindplane` to also delete the demo's Agents, Fleets, Configurations, and Destinations
+from BindPlane (in dependency order — agents must be removed before their parent fleets):
+
+```bash
+./scripts/down.sh --demo <name> --purge-bindplane
+```
 
 ---
 
